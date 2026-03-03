@@ -354,11 +354,45 @@ def _find_value_by_any_key(obj, wanted_keys: list[str]):
     return dfs(obj)
 
 
+def _find_value_by_key_tokens(obj, include_tokens: list[str], exclude_tokens: list[str] | None = None):
+    include = [_norm_key(t) for t in include_tokens if t]
+    exclude = [_norm_key(t) for t in (exclude_tokens or []) if t]
+
+    def key_match(k: str) -> bool:
+        nk = _norm_key(k)
+        if not nk:
+            return False
+        if any(t not in nk for t in include):
+            return False
+        if any(t in nk for t in exclude):
+            return False
+        return True
+
+    def dfs(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if key_match(str(k)):
+                    return v
+            for v in x.values():
+                got = dfs(v)
+                if got is not None:
+                    return got
+        elif isinstance(x, list):
+            for v in x:
+                got = dfs(v)
+                if got is not None:
+                    return got
+        return None
+
+    return dfs(obj)
+
+
 def _coalesce_value(*vals):
     for v in vals:
         if v is not None and v != "":
             return v
     return None
+
 
 def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     """
@@ -386,7 +420,9 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
 
     cpu_raw = _coalesce_value(
         _pick_by_paths(source["recent"], [("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
-        _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1"]),
+        _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1", "cpuRate"]),
+        _find_value_by_key_tokens(source, ["cpu", "usage"], ["core", "count", "temp"]),
+        _find_value_by_key_tokens(source, ["cpu", "percent"], ["core", "count", "temp"]),
     )
     cpu = _to_float_or_none(cpu_raw)
     if cpu is not None and 0 <= cpu <= 1:
@@ -395,22 +431,52 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     mem_used_raw = _coalesce_value(
         _pick_by_paths(source["recent"], [("memory", "used"), ("mem", "used")]),
         _find_value_by_any_key(source, ["memoryUsed", "memory_used", "memUsed", "ramUsed", "usedMemory", "memoryCurrent"]),
+        _find_value_by_key_tokens(source, ["memory", "used"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "used"], ["swap"]),
     )
     mem_total_raw = _coalesce_value(
         _pick_by_paths(source["recent"], [("memory", "total"), ("mem", "total")]),
         _find_value_by_any_key(source, ["memoryTotal", "memory_total", "memTotal", "ramTotal", "totalMemory", "memoryMax"]),
+        _find_value_by_key_tokens(source, ["memory", "total"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "total"], ["swap"]),
     )
     mem_used = _to_int_or_none(mem_used_raw)
     mem_total = _to_int_or_none(mem_total_raw)
 
+    # 如果没拿到 used，但拿到了 total/free，则推导 used = total - free
+    mem_free = _to_int_or_none(_coalesce_value(
+        _find_value_by_any_key(source, ["memoryFree", "memory_free", "memFree", "ramFree", "freeMemory", "availableMemory"]),
+        _find_value_by_key_tokens(source, ["memory", "free"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "free"], ["swap"]),
+        _find_value_by_key_tokens(source, ["memory", "available"], ["swap"]),
+    ))
+    if mem_used is None and mem_total is not None and mem_free is not None and mem_total >= mem_free:
+        mem_used = mem_total - mem_free
+
     online = _to_int_or_none(_coalesce_value(
         _pick_by_paths(source["recent"], [("users", "online"), ("xray", "online")]),
-        _find_value_by_any_key(source, ["online", "onlineCount", "onlineUsers", "activeConnections", "clients"]),
+        _find_value_by_any_key(source, ["online", "onlineCount", "onlineUsers", "activeConnections", "clients", "clientCount"]),
+        _find_value_by_key_tokens(source, ["online"], ["offline", "time"]),
+        _find_value_by_key_tokens(source, ["user", "online"], []),
+        _find_value_by_key_tokens(source, ["client", "count"], []),
     ))
 
     latency_ms = _to_float_or_none(_coalesce_value(
         _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
-        _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt"]),
+        _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt", "responseTime"]),
+        _find_value_by_key_tokens(source, ["latency"], []),
+        _find_value_by_key_tokens(source, ["ping"], []),
+    ))
+
+    return NodeInstant(
+        uuid=str(uuid or ""),
+        name=str(name or uuid or ""),
+        cpu=cpu,
+        mem_used=mem_used,
+        mem_total=mem_total,
+        online=online,
+        latency_ms=latency_ms,
+    )
     ))
 
     return NodeInstant(
@@ -1151,6 +1217,42 @@ def parse_top_scope(text: str):
     return ("unknown", None)
 
 
+def run_instant_raw(query: str | None = None):
+    ensure_dirs()
+    nodes_resp = get_json(f"{KOMARI_BASE_URL}/api/nodes")
+    if not (isinstance(nodes_resp, dict) and nodes_resp.get("status") == "success"):
+        raise RuntimeError(f"/api/nodes 返回异常：{nodes_resp}")
+
+    nodes = nodes_resp.get("data", [])
+    lines = [f"🧪 <b>瞬时原始字段预览</b>（{now_dt().strftime('%Y-%m-%d %H:%M:%S %Z')}）", ""]
+
+    for node in nodes:
+        uuid = node.get("uuid")
+        name = node.get("name") or uuid
+        if not uuid:
+            continue
+        if query:
+            q = query.lower()
+            if q not in str(name).lower() and q not in str(uuid).lower():
+                continue
+        try:
+            recent_resp = get_json(f"{KOMARI_BASE_URL}/api/recent/{uuid}")
+            points = recent_resp.get("data", []) if isinstance(recent_resp, dict) else []
+            last = points[-1] if points and isinstance(points[-1], dict) else {}
+        except Exception as e:
+            lines.append(f"🖥 <b>{name}</b>\n错误：{type(e).__name__}\n")
+            continue
+
+        key_sample = sorted(list(last.keys()))[:30]
+        lines.append(
+            f"🖥 <b>{name}</b>\n"
+            f"keys: <code>{', '.join(key_sample) if key_sample else '(none)'}</code>\n"
+            f"raw: <code>{json.dumps(last, ensure_ascii=False)[:800]}</code>\n"
+        )
+
+    telegram_send("\n".join(lines))
+
+
 def parse_status_query(text: str) -> str | None:
     parts = text.strip().split(maxsplit=1)
     if len(parts) < 2:
@@ -1245,6 +1347,9 @@ def listen_commands():
                     archive_and_prune_history()
                     telegram_send("✅ 已执行历史归档压缩")
 
+                elif text.startswith("/statusraw"):
+                    run_instant_raw(parse_status_query(text))
+
                 elif text.startswith("/status") or text.startswith("/instant"):
                     run_instant_status(parse_status_query(text))
 
@@ -1256,6 +1361,8 @@ def listen_commands():
                         "/top today|week|month\n"
                         "/top 6h（任意Nh）\n"
                         "/status [节点名关键词]\n"
+                        "/statusraw [节点名关键词]（查看原始字段）\n"
+                    )
                         "管理员：/archive；初始化：运行 bootstrap"
                     )
 
