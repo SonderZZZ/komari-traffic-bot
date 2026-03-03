@@ -177,6 +177,8 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | Top in last 6 hours         |
 | `/top week`  | Weekly Top                  |
 | `/top month` | Monthly Top                 |
+| `/status`    | Instant metrics for all nodes (CPU/MEM/online/latency) |
+| `/status hk` | Instant metrics filtered by node name keyword |
 ## 🕒 Timezone
 
 Statistics timezone: STAT_TZ (default Asia/Shanghai)

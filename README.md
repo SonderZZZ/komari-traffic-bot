@@ -173,6 +173,8 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | 最近 6 小时 Top      |
 | `/top week`  | 本周 Top           |
 | `/top month` | 本月 Top           |
+| `/status`    | 查看全部节点瞬时状态（CPU/内存/在线/延迟） |
+| `/status hk` | 按节点名关键词筛选瞬时状态 |
 
 ## 🕒 关于时区
 统计口径时区：STAT_TZ（默认 Asia/Shanghai）
@@ -203,6 +205,23 @@ Telegram offset
 docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
 docker compose up -d
 ```
+
+## 🛠 升级到瞬时状态命令（/status）
+如果你是通过 **docker compose** 部署的，
+**无需修改 `docker-compose.yml` 结构**。
+
+只需要更新镜像并重启容器：
+```
+docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
+docker compose up -d
+```
+
+可选检查：
+```
+docker compose logs -f komari-traffic-bot
+```
+看到 bot 正常启动后，直接在 Telegram 发送 `/status` 或 `/status 节点关键词` 即可。
+
 ## ⚠️ 常见问题
 /top 6h 没数据？
 需要采样积累时间（默认每 5 分钟一次）
