@@ -1370,8 +1370,7 @@ def listen_commands():
                         "/top 6h（任意Nh）\n"
                         "/status [节点名关键词]\n"
                         "/statusraw [节点名关键词]（查看原始字段）\n"
-                    )
-                        "管理员：/archive；初始化：运行 bootstrap"
+                        "管理员：/archive；初始化：运行 bootstrap\n"
                     )
 
             if offset is not None:
