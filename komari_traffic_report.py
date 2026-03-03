@@ -566,6 +566,8 @@ def run_instant_status(query: str | None = None):
         lines.append(
             f"ℹ️ 指标覆盖：CPU {cpu_ok}/{len(nodes)} · 内存 {mem_ok}/{len(nodes)} · 在线 {online_ok}/{len(nodes)} · 延迟 {latency_ok}/{len(nodes)}"
         )
+        if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and latency_ok == 0:
+            lines.append("⚠️ 当前 Komari API 可能未返回瞬时字段（仅返回流量累计）；请确认探针版本/接口返回内容。")
         lines.append("")
 
         nodes = sorted(nodes, key=lambda x: x.name.lower())
