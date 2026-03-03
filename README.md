@@ -285,3 +285,9 @@ Telegram 偶发断连？
 
 /status 全部 N/A？
 通常是 Komari 当前 API 未返回 CPU/内存/在线/延迟字段（仅有流量累计），先确认探针版本与 `/api/recent/{uuid}` 的实际返回。
+
+/status 延迟一直 N/A？
+你当前这版 Komari recent 返回通常不带 latency/ping 字段，这是接口返回限制，不是 bot 解析失败。
+
+/status 在线数来自哪里？
+若 API 没有直接 online 字段，bot 会使用 `connections.tcp + connections.udp` 作为“连接估算”。

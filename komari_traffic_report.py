@@ -393,6 +393,19 @@ def _coalesce_value(*vals):
             return v
     return None
 
+def _estimate_online_from_connections(source: dict) -> int | None:
+    conn = _coalesce_value(
+        _pick_by_paths(source.get("recent", {}), [("connections",)]),
+        _find_value_by_any_key(source, ["connections"]),
+    )
+    if not isinstance(conn, dict):
+        return None
+    tcp = _to_int_or_none(conn.get("tcp"))
+    udp = _to_int_or_none(conn.get("udp"))
+    vals = [v for v in (tcp, udp) if v is not None]
+    if not vals:
+        return None
+    return sum(vals)
 
 def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     """
@@ -407,10 +420,13 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
 
     # 兼容位置参数
     if len(args) == 2 and node_info is None and not uuid and not name:
+        # (uuid, name)
         uuid, name = args
     elif len(args) == 3 and node_info is None and not uuid and not name:
+        # (node_info, uuid, name)
         node_info, uuid, name = args
     elif len(args) == 1 and node_info is None:
+        # (node_info,)
         node_info = args[0]
 
     source = {
@@ -419,7 +435,7 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     }
 
     cpu_raw = _coalesce_value(
-        _pick_by_paths(source["recent"], [("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
+        _pick_by_paths(source["recent"], [("cpu", "usage"), ("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
         _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1", "cpuRate"]),
         _find_value_by_key_tokens(source, ["cpu", "usage"], ["core", "count", "temp"]),
         _find_value_by_key_tokens(source, ["cpu", "percent"], ["core", "count", "temp"]),
@@ -429,13 +445,13 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         cpu *= 100
 
     mem_used_raw = _coalesce_value(
-        _pick_by_paths(source["recent"], [("memory", "used"), ("mem", "used")]),
+        _pick_by_paths(source["recent"], [("ram", "used"), ("memory", "used"), ("mem", "used")]),
         _find_value_by_any_key(source, ["memoryUsed", "memory_used", "memUsed", "ramUsed", "usedMemory", "memoryCurrent"]),
         _find_value_by_key_tokens(source, ["memory", "used"], ["swap"]),
         _find_value_by_key_tokens(source, ["mem", "used"], ["swap"]),
     )
     mem_total_raw = _coalesce_value(
-        _pick_by_paths(source["recent"], [("memory", "total"), ("mem", "total")]),
+        _pick_by_paths(source["recent"], [("ram", "total"), ("memory", "total"), ("mem", "total")]),
         _find_value_by_any_key(source, ["memoryTotal", "memory_total", "memTotal", "ramTotal", "totalMemory", "memoryMax"]),
         _find_value_by_key_tokens(source, ["memory", "total"], ["swap"]),
         _find_value_by_key_tokens(source, ["mem", "total"], ["swap"]),
@@ -459,6 +475,7 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _find_value_by_key_tokens(source, ["online"], ["offline", "time"]),
         _find_value_by_key_tokens(source, ["user", "online"], []),
         _find_value_by_key_tokens(source, ["client", "count"], []),
+        _estimate_online_from_connections(source),
     ))
 
     latency_ms = _to_float_or_none(_coalesce_value(
@@ -466,17 +483,6 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt", "responseTime"]),
         _find_value_by_key_tokens(source, ["latency"], []),
         _find_value_by_key_tokens(source, ["ping"], []),
-    ))
-
-    return NodeInstant(
-        uuid=str(uuid or ""),
-        name=str(name or uuid or ""),
-        cpu=cpu,
-        mem_used=mem_used,
-        mem_total=mem_total,
-        online=online,
-        latency_ms=latency_ms,
-    )
     ))
 
     return NodeInstant(
@@ -619,7 +625,7 @@ def _fmt_memory(mem_used: int | None, mem_total: int | None) -> str:
 
 
 def _fmt_online(online: int | None) -> str:
-    return str(online) if online is not None else "N/A"
+    return f"{online}（连接估算）" if online is not None else "N/A"
 
 
 def _fmt_latency(latency_ms: float | None) -> str:
@@ -651,6 +657,8 @@ def run_instant_status(query: str | None = None):
         )
         if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and latency_ok == 0:
             lines.append("⚠️ 当前 Komari API 可能未返回瞬时字段（仅返回流量累计）；请确认探针版本/接口返回内容。")
+        elif latency_ok == 0:
+            lines.append("ℹ️ 该 Komari 返回中通常不含 latency 字段，延迟可能长期显示 N/A（属接口限制）。")
         lines.append("")
 
         nodes = sorted(nodes, key=lambda x: x.name.lower())
