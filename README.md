@@ -210,9 +210,18 @@ docker compose up -d
 如果你是通过 **docker compose** 部署的，
 **无需修改 `docker-compose.yml` 结构**。
 
-只需要更新镜像并重启容器：
+这个功能是代码能力，和你是否使用 `ghcr.io/wirelouis/komari-traffic-bot:latest` 没有强绑定：
+- 若你使用官方镜像：拉取你正在使用的标签并重启即可；
+- 若你使用自建镜像：重新构建并 `docker compose up -d` 即可。
+
+参考操作：
 ```
-docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
+# 官方镜像（示例）
+docker pull <你的镜像:你的标签>
+docker compose up -d
+
+# 自建镜像（示例）
+docker compose build --no-cache
 docker compose up -d
 ```
 
