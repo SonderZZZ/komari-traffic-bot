@@ -282,3 +282,6 @@ Komari 某节点超时？
 
 Telegram 偶发断连？
 已内置自动重试
+
+/status 全部 N/A？
+通常是 Komari 当前 API 未返回 CPU/内存/在线/延迟字段（仅有流量累计），先确认探针版本与 `/api/recent/{uuid}` 的实际返回。

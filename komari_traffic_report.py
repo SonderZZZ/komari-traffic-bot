@@ -328,6 +328,49 @@ def _pick_by_paths(obj: dict, paths: list[tuple[str, ...]]):
     return None
 
 
+def _norm_key(s: str) -> str:
+    return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+
+def _find_value_by_any_key(obj, wanted_keys: list[str]):
+    wanted = {_norm_key(k) for k in wanted_keys}
+
+    def dfs(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if _norm_key(k) in wanted:
+                    return v
+            for v in x.values():
+                got = dfs(v)
+                if got is not None:
+                    return got
+        elif isinstance(x, list):
+            for v in x:
+                got = dfs(v)
+                if got is not None:
+                    return got
+        return None
+
+    return dfs(obj)
+
+
+def _coalesce_value(*vals):
+    for v in vals:
+        if v is not None and v != "":
+            return v
+    return None
+
+
+def _extract_node_instant(last_point: dict, node_info: dict, uuid: str, name: str) -> NodeInstant:
+    source = {
+        "recent": last_point if isinstance(last_point, dict) else {},
+        "node": node_info if isinstance(node_info, dict) else {},
+    }
+
+    cpu_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
+        _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1"]),
+    )
 def _extract_node_instant(last_point: dict, uuid: str, name: str) -> NodeInstant:
     cpu_raw = _pick_by_paths(last_point, [
         ("cpu",), ("cpuUsage",), ("cpuPercent",), ("cpu_percent",), ("system", "cpu"),
@@ -336,6 +379,26 @@ def _extract_node_instant(last_point: dict, uuid: str, name: str) -> NodeInstant
     if cpu is not None and 0 <= cpu <= 1:
         cpu *= 100
 
+    mem_used_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("memory", "used"), ("mem", "used")]),
+        _find_value_by_any_key(source, ["memoryUsed", "memory_used", "memUsed", "ramUsed", "usedMemory", "memoryCurrent"]),
+    )
+    mem_total_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("memory", "total"), ("mem", "total")]),
+        _find_value_by_any_key(source, ["memoryTotal", "memory_total", "memTotal", "ramTotal", "totalMemory", "memoryMax"]),
+    )
+    mem_used = _to_int_or_none(mem_used_raw)
+    mem_total = _to_int_or_none(mem_total_raw)
+
+    online = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("users", "online"), ("xray", "online")]),
+        _find_value_by_any_key(source, ["online", "onlineCount", "onlineUsers", "activeConnections", "clients"]),
+    ))
+
+    latency_ms = _to_float_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
+        _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt"]),
+    ))
     mem_used = _to_int_or_none(_pick_by_paths(last_point, [
         ("memory", "used"), ("memoryUsed",), ("memory_used",), ("memUsed",), ("mem", "used"),
     ]))
@@ -459,6 +522,7 @@ def fetch_nodes_instant():
             return None, f"{name}(empty)"
 
         last = points[-1] if isinstance(points[-1], dict) else {}
+        return _extract_node_instant(last, node_info=node, uuid=uuid, name=name), None
         return _extract_node_instant(last, uuid=uuid, name=name), None
 
     max_workers = max(1, min(len(nodes), KOMARI_FETCH_WORKERS))
@@ -514,6 +578,17 @@ def run_instant_status(query: str | None = None):
         else:
             lines.append("（暂无可用节点数据）")
     else:
+        cpu_ok = sum(1 for n in nodes if n.cpu is not None)
+        mem_ok = sum(1 for n in nodes if n.mem_used is not None or n.mem_total is not None)
+        online_ok = sum(1 for n in nodes if n.online is not None)
+        latency_ok = sum(1 for n in nodes if n.latency_ms is not None)
+        lines.append(
+            f"ℹ️ 指标覆盖：CPU {cpu_ok}/{len(nodes)} · 内存 {mem_ok}/{len(nodes)} · 在线 {online_ok}/{len(nodes)} · 延迟 {latency_ok}/{len(nodes)}"
+        )
+        if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and latency_ok == 0:
+            lines.append("⚠️ 当前 Komari API 可能未返回瞬时字段（仅返回流量累计）；请确认探针版本/接口返回内容。")
+        lines.append("")
+
         nodes = sorted(nodes, key=lambda x: x.name.lower())
         for n in nodes:
             lines.append(
