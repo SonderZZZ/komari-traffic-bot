@@ -177,6 +177,9 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | Top in last 6 hours         |
 | `/top week`  | Weekly Top                  |
 | `/top month` | Monthly Top                 |
+| `/status`    | Instant metrics for all nodes (CPU/MEM/online/latency) |
+| `/status hk` | Instant metrics filtered by node name keyword |
+| `/statusraw hk` | Raw recent payload preview for field debugging |
 ## 🕒 Timezone
 
 Statistics timezone: STAT_TZ (default Asia/Shanghai)
@@ -198,6 +201,48 @@ History (daily records & compressed archives)
 Telegram update offset
 
 Upgrades and restarts will not lose data.
+
+
+## 🏗 Build your own image and use it in compose
+If you prefer using **your own image repository** (Docker Hub / private GHCR), follow these steps.
+
+### 1) Build a local image from this repo
+```
+docker build -t komari-traffic-bot:local .
+```
+
+### 2) Tag with your own repository/name
+```
+docker tag komari-traffic-bot:local yourname/komari-traffic-bot:v1.0.0
+```
+
+### 3) Push to your registry (optional but recommended)
+```
+docker login
+docker push yourname/komari-traffic-bot:v1.0.0
+```
+
+### 4) Update `docker-compose.yml` image fields
+Use your image for both services:
+```
+services:
+  komari-traffic-bot:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+
+  komari-traffic-cron:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+```
+
+### 5) Restart services
+```
+docker compose up -d
+docker compose ps
+docker compose logs -f komari-traffic-bot
+```
+
+> For future upgrades, rebuild/re-tag/re-push, then update the tag in compose (for example `v1.0.1`) and run `docker compose up -d`.
 
 ## 🔄 Upgrade
 ```
