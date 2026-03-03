@@ -173,8 +173,9 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | 最近 6 小时 Top      |
 | `/top week`  | 本周 Top           |
 | `/top month` | 本月 Top           |
-| `/status`    | 查看全部节点瞬时状态（CPU/内存/在线/延迟） |
+| `/status`    | 查看全部节点瞬时状态（CPU/内存/在线/上传/下载） |
 | `/status hk` | 按节点名关键词筛选瞬时状态 |
+| `/statusraw hk` | 输出节点 recent 原始字段（用于排查字段名） |
 
 ## 🕒 关于时区
 统计口径时区：STAT_TZ（默认 Asia/Shanghai）
@@ -283,11 +284,8 @@ Komari 某节点超时？
 Telegram 偶发断连？
 已内置自动重试
 
-/status 全部 N/A？
-通常是 Komari 当前 API 未返回 CPU/内存/在线/延迟字段（仅有流量累计），先确认探针版本与 `/api/recent/{uuid}` 的实际返回。
-
-/status 延迟一直 N/A？
-你当前这版 Komari recent 返回通常不带 latency/ping 字段，这是接口返回限制，不是 bot 解析失败。
+/status 数据异常？
+请先使用 `/statusraw` 查看 `/api/recent/{uuid}` 的原始字段；不同 Komari 版本字段名可能不同。
 
 /status 在线数来自哪里？
 若 API 没有直接 online 字段，bot 会使用 `connections.tcp + connections.udp` 作为“连接估算”。

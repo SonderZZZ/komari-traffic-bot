@@ -293,7 +293,8 @@ class NodeInstant:
     mem_used: int | None
     mem_total: int | None
     online: int | None
-    latency_ms: float | None
+    up_rate: int | None
+    down_rate: int | None
 
 
 def _to_int_or_none(v) -> int | None:
@@ -393,6 +394,9 @@ def _coalesce_value(*vals):
             return v
     return None
 
+
+
+
 def _estimate_online_from_connections(source: dict) -> int | None:
     conn = _coalesce_value(
         _pick_by_paths(source.get("recent", {}), [("connections",)]),
@@ -459,7 +463,6 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     mem_used = _to_int_or_none(mem_used_raw)
     mem_total = _to_int_or_none(mem_total_raw)
 
-    # 如果没拿到 used，但拿到了 total/free，则推导 used = total - free
     mem_free = _to_int_or_none(_coalesce_value(
         _find_value_by_any_key(source, ["memoryFree", "memory_free", "memFree", "ramFree", "freeMemory", "availableMemory"]),
         _find_value_by_key_tokens(source, ["memory", "free"], ["swap"]),
@@ -478,11 +481,13 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _estimate_online_from_connections(source),
     ))
 
-    latency_ms = _to_float_or_none(_coalesce_value(
-        _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
-        _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt", "responseTime"]),
-        _find_value_by_key_tokens(source, ["latency"], []),
-        _find_value_by_key_tokens(source, ["ping"], []),
+    up_rate = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("network", "up"), ("net", "up")]),
+        _find_value_by_any_key(source, ["up", "upload", "uploadRate", "upRate", "tx", "txRate"]),
+    ))
+    down_rate = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("network", "down"), ("net", "down")]),
+        _find_value_by_any_key(source, ["down", "download", "downloadRate", "downRate", "rx", "rxRate"]),
     ))
 
     return NodeInstant(
@@ -492,7 +497,8 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         mem_used=mem_used,
         mem_total=mem_total,
         online=online,
-        latency_ms=latency_ms,
+        up_rate=up_rate,
+        down_rate=down_rate,
     )
 
 
@@ -628,8 +634,8 @@ def _fmt_online(online: int | None) -> str:
     return f"{online}（连接估算）" if online is not None else "N/A"
 
 
-def _fmt_latency(latency_ms: float | None) -> str:
-    return f"{latency_ms:.1f} ms" if latency_ms is not None else "N/A"
+def _fmt_rate(v: int | None) -> str:
+    return f"{human_bytes(v)}/s" if v is not None else "N/A"
 
 
 def run_instant_status(query: str | None = None):
@@ -651,24 +657,24 @@ def run_instant_status(query: str | None = None):
         cpu_ok = sum(1 for n in nodes if n.cpu is not None)
         mem_ok = sum(1 for n in nodes if n.mem_used is not None or n.mem_total is not None)
         online_ok = sum(1 for n in nodes if n.online is not None)
-        latency_ok = sum(1 for n in nodes if n.latency_ms is not None)
+        up_ok = sum(1 for n in nodes if n.up_rate is not None)
+        down_ok = sum(1 for n in nodes if n.down_rate is not None)
         lines.append(
-            f"ℹ️ 指标覆盖：CPU {cpu_ok}/{len(nodes)} · 内存 {mem_ok}/{len(nodes)} · 在线 {online_ok}/{len(nodes)} · 延迟 {latency_ok}/{len(nodes)}"
+            f"ℹ️ 指标覆盖：CPU {cpu_ok}/{len(nodes)} · 内存 {mem_ok}/{len(nodes)} · 在线 {online_ok}/{len(nodes)} · 上传 {up_ok}/{len(nodes)} · 下载 {down_ok}/{len(nodes)}"
         )
-        if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and latency_ok == 0:
+        if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and up_ok == 0 and down_ok == 0:
             lines.append("⚠️ 当前 Komari API 可能未返回瞬时字段（仅返回流量累计）；请确认探针版本/接口返回内容。")
-        elif latency_ok == 0:
-            lines.append("ℹ️ 该 Komari 返回中通常不含 latency 字段，延迟可能长期显示 N/A（属接口限制）。")
         lines.append("")
 
         nodes = sorted(nodes, key=lambda x: x.name.lower())
         for n in nodes:
             lines.append(
                 f"🖥 <b>{n.name}</b>\n"
-                f"🧠 CPU：{_fmt_cpu(n.cpu)}\n"
-                f"💾 内存：{_fmt_memory(n.mem_used, n.mem_total)}\n"
-                f"👥 在线：{_fmt_online(n.online)}\n"
-                f"📶 延迟：{_fmt_latency(n.latency_ms)}\n"
+                f"├ 🧠 CPU：<b>{_fmt_cpu(n.cpu)}</b>\n"
+                f"├ 💾 内存：<b>{_fmt_memory(n.mem_used, n.mem_total)}</b>\n"
+                f"├ 👥 在线：<b>{_fmt_online(n.online)}</b>\n"
+                f"├ ⬆️ 上传：<b>{_fmt_rate(n.up_rate)}</b>\n"
+                f"└ ⬇️ 下载：<b>{_fmt_rate(n.down_rate)}</b>\n"
             )
 
     if skipped:
@@ -1370,7 +1376,7 @@ def listen_commands():
                         "/top 6h（任意Nh）\n"
                         "/status [节点名关键词]\n"
                         "/statusraw [节点名关键词]（查看原始字段）\n"
-                        "管理员：/archive；初始化：运行 bootstrap\n"
+                        "管理员：/archive；初始化：运行 bootstrap"
                     )
 
             if offset is not None:

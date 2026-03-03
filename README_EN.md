@@ -177,8 +177,9 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | Top in last 6 hours         |
 | `/top week`  | Weekly Top                  |
 | `/top month` | Monthly Top                 |
-| `/status`    | Instant metrics for all nodes (CPU/MEM/online/latency) |
+| `/status`    | Instant metrics for all nodes (CPU/MEM/online/upload/download) |
 | `/status hk` | Instant metrics filtered by node name keyword |
+| `/statusraw hk` | Raw recent payload preview for field debugging |
 ## 🕒 Timezone
 
 Statistics timezone: STAT_TZ (default Asia/Shanghai)
@@ -248,3 +249,8 @@ docker compose logs -f komari-traffic-bot
 docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
 docker compose up -d
 ```
+
+
+## Notes for `/status`
+- If values look wrong/missing, run `/statusraw` first to inspect raw `/api/recent/{uuid}` fields.
+- If no direct online field exists, the bot estimates online as `connections.tcp + connections.udp`.
