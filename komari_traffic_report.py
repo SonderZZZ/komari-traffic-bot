@@ -285,6 +285,223 @@ class NodeTotal:
     down: int
 
 
+@dataclass
+class NodeInstant:
+    uuid: str
+    name: str
+    cpu: float | None
+    mem_used: int | None
+    mem_total: int | None
+    online: int | None
+    up_rate: int | None
+    down_rate: int | None
+
+
+def _to_int_or_none(v) -> int | None:
+    try:
+        if v is None or v == "":
+            return None
+        return int(float(v))
+    except Exception:
+        return None
+
+
+def _to_float_or_none(v) -> float | None:
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _pick_by_paths(obj: dict, paths: list[tuple[str, ...]]):
+    for path in paths:
+        cur = obj
+        ok = True
+        for key in path:
+            if not isinstance(cur, dict) or key not in cur:
+                ok = False
+                break
+            cur = cur.get(key)
+        if ok:
+            return cur
+    return None
+
+
+def _norm_key(s: str) -> str:
+    return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+
+def _find_value_by_any_key(obj, wanted_keys: list[str]):
+    wanted = {_norm_key(k) for k in wanted_keys}
+
+    def dfs(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if _norm_key(k) in wanted:
+                    return v
+            for v in x.values():
+                got = dfs(v)
+                if got is not None:
+                    return got
+        elif isinstance(x, list):
+            for v in x:
+                got = dfs(v)
+                if got is not None:
+                    return got
+        return None
+
+    return dfs(obj)
+
+
+def _find_value_by_key_tokens(obj, include_tokens: list[str], exclude_tokens: list[str] | None = None):
+    include = [_norm_key(t) for t in include_tokens if t]
+    exclude = [_norm_key(t) for t in (exclude_tokens or []) if t]
+
+    def key_match(k: str) -> bool:
+        nk = _norm_key(k)
+        if not nk:
+            return False
+        if any(t not in nk for t in include):
+            return False
+        if any(t in nk for t in exclude):
+            return False
+        return True
+
+    def dfs(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if key_match(str(k)):
+                    return v
+            for v in x.values():
+                got = dfs(v)
+                if got is not None:
+                    return got
+        elif isinstance(x, list):
+            for v in x:
+                got = dfs(v)
+                if got is not None:
+                    return got
+        return None
+
+    return dfs(obj)
+
+
+def _coalesce_value(*vals):
+    for v in vals:
+        if v is not None and v != "":
+            return v
+    return None
+
+
+
+
+def _estimate_online_from_connections(source: dict) -> int | None:
+    conn = _coalesce_value(
+        _pick_by_paths(source.get("recent", {}), [("connections",)]),
+        _find_value_by_any_key(source, ["connections"]),
+    )
+    if not isinstance(conn, dict):
+        return None
+    tcp = _to_int_or_none(conn.get("tcp"))
+    udp = _to_int_or_none(conn.get("udp"))
+    vals = [v for v in (tcp, udp) if v is not None]
+    if not vals:
+        return None
+    return sum(vals)
+
+def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
+    """
+    兼容多种历史调用方式，避免分支合并后签名不一致导致 TypeError：
+      - _extract_node_instant(last_point, uuid, name)
+      - _extract_node_instant(last_point, node_info, uuid, name)
+      - _extract_node_instant(last_point, node_info=..., uuid=..., name=...)
+    """
+    node_info = kwargs.pop("node_info", None)
+    uuid = kwargs.pop("uuid", "")
+    name = kwargs.pop("name", "")
+
+    # 兼容位置参数
+    if len(args) == 2 and node_info is None and not uuid and not name:
+        # (uuid, name)
+        uuid, name = args
+    elif len(args) == 3 and node_info is None and not uuid and not name:
+        # (node_info, uuid, name)
+        node_info, uuid, name = args
+    elif len(args) == 1 and node_info is None:
+        # (node_info,)
+        node_info = args[0]
+
+    source = {
+        "recent": last_point if isinstance(last_point, dict) else {},
+        "node": node_info if isinstance(node_info, dict) else {},
+    }
+
+    cpu_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("cpu", "usage"), ("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
+        _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1", "cpuRate"]),
+        _find_value_by_key_tokens(source, ["cpu", "usage"], ["core", "count", "temp"]),
+        _find_value_by_key_tokens(source, ["cpu", "percent"], ["core", "count", "temp"]),
+    )
+    cpu = _to_float_or_none(cpu_raw)
+    if cpu is not None and 0 <= cpu <= 1:
+        cpu *= 100
+
+    mem_used_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("ram", "used"), ("memory", "used"), ("mem", "used")]),
+        _find_value_by_any_key(source, ["memoryUsed", "memory_used", "memUsed", "ramUsed", "usedMemory", "memoryCurrent"]),
+        _find_value_by_key_tokens(source, ["memory", "used"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "used"], ["swap"]),
+    )
+    mem_total_raw = _coalesce_value(
+        _pick_by_paths(source["recent"], [("ram", "total"), ("memory", "total"), ("mem", "total")]),
+        _find_value_by_any_key(source, ["memoryTotal", "memory_total", "memTotal", "ramTotal", "totalMemory", "memoryMax"]),
+        _find_value_by_key_tokens(source, ["memory", "total"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "total"], ["swap"]),
+    )
+    mem_used = _to_int_or_none(mem_used_raw)
+    mem_total = _to_int_or_none(mem_total_raw)
+
+    mem_free = _to_int_or_none(_coalesce_value(
+        _find_value_by_any_key(source, ["memoryFree", "memory_free", "memFree", "ramFree", "freeMemory", "availableMemory"]),
+        _find_value_by_key_tokens(source, ["memory", "free"], ["swap"]),
+        _find_value_by_key_tokens(source, ["mem", "free"], ["swap"]),
+        _find_value_by_key_tokens(source, ["memory", "available"], ["swap"]),
+    ))
+    if mem_used is None and mem_total is not None and mem_free is not None and mem_total >= mem_free:
+        mem_used = mem_total - mem_free
+
+    online = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("users", "online"), ("xray", "online")]),
+        _find_value_by_any_key(source, ["online", "onlineCount", "onlineUsers", "activeConnections", "clients", "clientCount"]),
+        _find_value_by_key_tokens(source, ["online"], ["offline", "time"]),
+        _find_value_by_key_tokens(source, ["user", "online"], []),
+        _find_value_by_key_tokens(source, ["client", "count"], []),
+        _estimate_online_from_connections(source),
+    ))
+
+    up_rate = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("network", "up"), ("net", "up")]),
+        _find_value_by_any_key(source, ["up", "upload", "uploadRate", "upRate", "tx", "txRate"]),
+    ))
+    down_rate = _to_int_or_none(_coalesce_value(
+        _pick_by_paths(source["recent"], [("network", "down"), ("net", "down")]),
+        _find_value_by_any_key(source, ["down", "download", "downloadRate", "downRate", "rx", "rxRate"]),
+    ))
+
+    return NodeInstant(
+        uuid=str(uuid or ""),
+        name=str(name or uuid or ""),
+        cpu=cpu,
+        mem_used=mem_used,
+        mem_total=mem_total,
+        online=online,
+        up_rate=up_rate,
+        down_rate=down_rate,
+    )
+
+
 def fetch_nodes_and_totals():
     """
     返回：
@@ -341,6 +558,130 @@ def fetch_nodes_and_totals():
                 out.append(result)
 
     return out, skipped
+
+
+def fetch_nodes_instant():
+    """
+    返回：
+      - out: list[NodeInstant]
+      - skipped: list[str]
+    """
+    if not KOMARI_BASE_URL:
+        raise RuntimeError("KOMARI_BASE_URL 未设置（例如 https://komari.example）")
+
+    nodes_resp = get_json(f"{KOMARI_BASE_URL}/api/nodes")
+    if not (isinstance(nodes_resp, dict) and nodes_resp.get("status") == "success"):
+        raise RuntimeError(f"/api/nodes 返回异常：{nodes_resp}")
+
+    nodes = nodes_resp.get("data", [])
+    out: list[NodeInstant] = []
+    skipped: list[str] = []
+
+    def fetch_one(node: dict):
+        uuid = node.get("uuid")
+        name = node.get("name") or uuid
+        if not uuid:
+            return None, None
+        try:
+            recent_resp = get_json(f"{KOMARI_BASE_URL}/api/recent/{uuid}")
+        except requests.exceptions.ReadTimeout:
+            return None, f"{name}(timeout)"
+        except requests.exceptions.RequestException as e:
+            return None, f"{name}({type(e).__name__})"
+        except Exception as e:
+            return None, f"{name}({type(e).__name__})"
+
+        if not (isinstance(recent_resp, dict) and recent_resp.get("status") == "success"):
+            return None, f"{name}(bad_resp)"
+
+        points = recent_resp.get("data", [])
+        if not points:
+            return None, f"{name}(empty)"
+
+        last = points[-1] if isinstance(points[-1], dict) else {}
+        return _extract_node_instant(last, node_info=node, uuid=uuid, name=name), None
+
+    max_workers = max(1, min(len(nodes), KOMARI_FETCH_WORKERS))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(fetch_one, n): n for n in nodes}
+        for future in concurrent.futures.as_completed(future_map):
+            result, skip = future.result()
+            if skip:
+                skipped.append(skip)
+                continue
+            if result:
+                out.append(result)
+
+    return out, skipped
+
+
+def _fmt_cpu(cpu: float | None) -> str:
+    return f"{cpu:.1f}%" if cpu is not None else "N/A"
+
+
+def _fmt_memory(mem_used: int | None, mem_total: int | None) -> str:
+    if mem_used is None and mem_total is None:
+        return "N/A"
+    if mem_used is None:
+        return f"N/A / {human_bytes(mem_total)}"
+    if mem_total is None or mem_total <= 0:
+        return human_bytes(mem_used)
+    mem_pct = mem_used * 100.0 / mem_total
+    return f"{human_bytes(mem_used)} / {human_bytes(mem_total)} ({mem_pct:.1f}%)"
+
+
+def _fmt_online(online: int | None) -> str:
+    return f"{online}（连接估算）" if online is not None else "N/A"
+
+
+def _fmt_rate(v: int | None) -> str:
+    return f"{human_bytes(v)}/s" if v is not None else "N/A"
+
+
+def run_instant_status(query: str | None = None):
+    ensure_dirs()
+    nodes, skipped = fetch_nodes_instant()
+
+    if query:
+        q = query.strip().lower()
+        nodes = [n for n in nodes if q in n.name.lower() or q in n.uuid.lower()]
+
+    lines = [f"⚡ <b>服务器瞬时状态</b>（{now_dt().strftime('%Y-%m-%d %H:%M:%S %Z')}）", ""]
+
+    if not nodes:
+        if query:
+            lines.append(f"未找到匹配节点：<code>{query}</code>")
+        else:
+            lines.append("（暂无可用节点数据）")
+    else:
+        cpu_ok = sum(1 for n in nodes if n.cpu is not None)
+        mem_ok = sum(1 for n in nodes if n.mem_used is not None or n.mem_total is not None)
+        online_ok = sum(1 for n in nodes if n.online is not None)
+        up_ok = sum(1 for n in nodes if n.up_rate is not None)
+        down_ok = sum(1 for n in nodes if n.down_rate is not None)
+        lines.append(
+            f"ℹ️ 指标覆盖：CPU {cpu_ok}/{len(nodes)} · 内存 {mem_ok}/{len(nodes)} · 在线 {online_ok}/{len(nodes)} · 上传 {up_ok}/{len(nodes)} · 下载 {down_ok}/{len(nodes)}"
+        )
+        if cpu_ok == 0 and mem_ok == 0 and online_ok == 0 and up_ok == 0 and down_ok == 0:
+            lines.append("⚠️ 当前 Komari API 可能未返回瞬时字段（仅返回流量累计）；请确认探针版本/接口返回内容。")
+        lines.append("")
+
+        nodes = sorted(nodes, key=lambda x: x.name.lower())
+        for n in nodes:
+            lines.append(
+                f"🖥 <b>{n.name}</b>\n"
+                f"├ 🧠 CPU：<b>{_fmt_cpu(n.cpu)}</b>\n"
+                f"├ 💾 内存：<b>{_fmt_memory(n.mem_used, n.mem_total)}</b>\n"
+                f"├ 👥 在线：<b>{_fmt_online(n.online)}</b>\n"
+                f"├ ⬆️ 上传：<b>{_fmt_rate(n.up_rate)}</b>\n"
+                f"└ ⬇️ 下载：<b>{_fmt_rate(n.down_rate)}</b>\n"
+            )
+
+    if skipped:
+        lines.append("⚠️ <b>以下节点因异常被跳过</b>：")
+        lines.append("、".join(skipped[:30]) + ("……" if len(skipped) > 30 else ""))
+
+    telegram_send("\n".join(lines))
 
 
 def build_nodes_map_from_current(current: list[NodeTotal]) -> dict:
@@ -890,6 +1231,49 @@ def parse_top_scope(text: str):
     return ("unknown", None)
 
 
+def run_instant_raw(query: str | None = None):
+    ensure_dirs()
+    nodes_resp = get_json(f"{KOMARI_BASE_URL}/api/nodes")
+    if not (isinstance(nodes_resp, dict) and nodes_resp.get("status") == "success"):
+        raise RuntimeError(f"/api/nodes 返回异常：{nodes_resp}")
+
+    nodes = nodes_resp.get("data", [])
+    lines = [f"🧪 <b>瞬时原始字段预览</b>（{now_dt().strftime('%Y-%m-%d %H:%M:%S %Z')}）", ""]
+
+    for node in nodes:
+        uuid = node.get("uuid")
+        name = node.get("name") or uuid
+        if not uuid:
+            continue
+        if query:
+            q = query.lower()
+            if q not in str(name).lower() and q not in str(uuid).lower():
+                continue
+        try:
+            recent_resp = get_json(f"{KOMARI_BASE_URL}/api/recent/{uuid}")
+            points = recent_resp.get("data", []) if isinstance(recent_resp, dict) else []
+            last = points[-1] if points and isinstance(points[-1], dict) else {}
+        except Exception as e:
+            lines.append(f"🖥 <b>{name}</b>\n错误：{type(e).__name__}\n")
+            continue
+
+        key_sample = sorted(list(last.keys()))[:30]
+        lines.append(
+            f"🖥 <b>{name}</b>\n"
+            f"keys: <code>{', '.join(key_sample) if key_sample else '(none)'}</code>\n"
+            f"raw: <code>{json.dumps(last, ensure_ascii=False)[:800]}</code>\n"
+        )
+
+    telegram_send("\n".join(lines))
+
+
+def parse_status_query(text: str) -> str | None:
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    return parts[1].strip() or None
+
+
 def listen_commands():
     ensure_dirs()
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -977,6 +1361,12 @@ def listen_commands():
                     archive_and_prune_history()
                     telegram_send("✅ 已执行历史归档压缩")
 
+                elif text.startswith("/statusraw"):
+                    run_instant_raw(parse_status_query(text))
+
+                elif text.startswith("/status") or text.startswith("/instant"):
+                    run_instant_status(parse_status_query(text))
+
                 elif text.startswith("/help") or text.startswith("/start"):
                     telegram_send(
                         "可用命令：\n"
@@ -984,6 +1374,8 @@ def listen_commands():
                         "/top  (默认 today)\n"
                         "/top today|week|month\n"
                         "/top 6h（任意Nh）\n"
+                        "/status [节点名关键词]\n"
+                        "/statusraw [节点名关键词]（查看原始字段）\n"
                         "管理员：/archive；初始化：运行 bootstrap"
                     )
 

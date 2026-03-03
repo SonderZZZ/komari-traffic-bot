@@ -173,6 +173,9 @@ docker compose exec komari-traffic-bot \
 | `/top 6h`    | 最近 6 小时 Top      |
 | `/top week`  | 本周 Top           |
 | `/top month` | 本月 Top           |
+| `/status`    | 查看全部节点瞬时状态（CPU/内存/在线/上传/下载） |
+| `/status hk` | 按节点名关键词筛选瞬时状态 |
+| `/statusraw hk` | 输出节点 recent 原始字段（用于排查字段名） |
 
 ## 🕒 关于时区
 统计口径时区：STAT_TZ（默认 Asia/Shanghai）
@@ -198,11 +201,79 @@ Telegram offset
 
 升级 / 重启容器不会丢数据。
 
+
+## 🏗 自建镜像并替换为你的镜像（推荐）
+如果你希望使用**自己的镜像仓库**（例如 Docker Hub / GHCR 私有仓库），可以按下面步骤操作。
+
+### 1) 在项目目录构建本地镜像
+```
+docker build -t komari-traffic-bot:local .
+```
+
+### 2) 打你的镜像标签（把仓库名改成你的）
+```
+docker tag komari-traffic-bot:local yourname/komari-traffic-bot:v1.0.0
+```
+
+### 3) 推送到你的镜像仓库（可选，但推荐）
+```
+docker login
+docker push yourname/komari-traffic-bot:v1.0.0
+```
+
+### 4) 修改 `docker-compose.yml` 的 image
+把两个服务都改成你的镜像：
+```
+services:
+  komari-traffic-bot:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+
+  komari-traffic-cron:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+```
+
+### 5) 重启服务
+```
+docker compose up -d
+docker compose ps
+docker compose logs -f komari-traffic-bot
+```
+
+> 以后升级你自己的版本时，只需要重新 build/tag/push，然后把 compose 中 tag 改为新版本（如 `v1.0.1`）再 `docker compose up -d`。
+
 ## 🔄 升级方式
 ```
 docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
 docker compose up -d
 ```
+
+## 🛠 升级到瞬时状态命令（/status）
+如果你是通过 **docker compose** 部署的，
+**无需修改 `docker-compose.yml` 结构**。
+
+这个功能是代码能力，和你是否使用 `ghcr.io/wirelouis/komari-traffic-bot:latest` 没有强绑定：
+- 若你使用官方镜像：拉取你正在使用的标签并重启即可；
+- 若你使用自建镜像：重新构建并 `docker compose up -d` 即可。
+
+参考操作：
+```
+# 官方镜像（示例）
+docker pull <你的镜像:你的标签>
+docker compose up -d
+
+# 自建镜像（示例）
+docker compose build --no-cache
+docker compose up -d
+```
+
+可选检查：
+```
+docker compose logs -f komari-traffic-bot
+```
+看到 bot 正常启动后，直接在 Telegram 发送 `/status` 或 `/status 节点关键词` 即可。
+
 ## ⚠️ 常见问题
 /top 6h 没数据？
 需要采样积累时间（默认每 5 分钟一次）
@@ -212,3 +283,9 @@ Komari 某节点超时？
 
 Telegram 偶发断连？
 已内置自动重试
+
+/status 数据异常？
+请先使用 `/statusraw` 查看 `/api/recent/{uuid}` 的原始字段；不同 Komari 版本字段名可能不同。
+
+/status 在线数来自哪里？
+若 API 没有直接 online 字段，bot 会使用 `connections.tcp + connections.udp` 作为“连接估算”。
