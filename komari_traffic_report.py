@@ -360,7 +360,6 @@ def _coalesce_value(*vals):
             return v
     return None
 
-
 def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     """
     兼容多种历史调用方式，避免分支合并后签名不一致导致 TypeError：
@@ -374,13 +373,10 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
 
     # 兼容位置参数
     if len(args) == 2 and node_info is None and not uuid and not name:
-        # (uuid, name)
         uuid, name = args
     elif len(args) == 3 and node_info is None and not uuid and not name:
-        # (node_info, uuid, name)
         node_info, uuid, name = args
     elif len(args) == 1 and node_info is None:
-        # (node_info,)
         node_info = args[0]
 
     source = {
@@ -416,30 +412,10 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
         _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt"]),
     ))
-    mem_used = _to_int_or_none(_pick_by_paths(last_point, [
-    ("memory", "used"), ("memoryUsed",), ("memory_used",), ("memUsed",), ("mem", "used"),
-]))
-    mem_total = _to_int_or_none(_pick_by_paths(last_point, [
-    ("memory", "total"), ("memoryTotal",), ("memory_total",), ("memTotal",), ("mem", "total"),
-]))
 
-    online = _to_int_or_none(_pick_by_paths(last_point, [
-    ("online",), ("onlineCount",), ("users", "online"), ("xray", "online"),
-]))
-
-    latency_ms = _to_float_or_none(_pick_by_paths(last_point, [
-    ("latency",), ("latencyMs",), ("latency_ms",), ("ping",), ("delay",),
-]))
-
-return NodeInstant(
-    uuid=str(uuid or ""),
-    name=str(name or uuid or ""),
-    cpu=cpu,
-    mem_used=mem_used,
-    mem_total=mem_total,
-    online=online,
-    latency_ms=latency_ms,
-)
+    return NodeInstant(
+        uuid=str(uuid or ""),
+        name=str(name or uuid or ""),
         cpu=cpu,
         mem_used=mem_used,
         mem_total=mem_total,
@@ -546,7 +522,6 @@ def fetch_nodes_instant():
 
         last = points[-1] if isinstance(points[-1], dict) else {}
         return _extract_node_instant(last, node_info=node, uuid=uuid, name=name), None
-        return _extract_node_instant(last, uuid=uuid, name=name), None
 
     max_workers = max(1, min(len(nodes), KOMARI_FETCH_WORKERS))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
