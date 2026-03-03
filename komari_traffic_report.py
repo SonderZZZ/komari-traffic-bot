@@ -407,13 +407,10 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
 
     # 兼容位置参数
     if len(args) == 2 and node_info is None and not uuid and not name:
-        # (uuid, name)
         uuid, name = args
     elif len(args) == 3 and node_info is None and not uuid and not name:
-        # (node_info, uuid, name)
         node_info, uuid, name = args
     elif len(args) == 1 and node_info is None:
-        # (node_info,)
         node_info = args[0]
 
     source = {
@@ -446,6 +443,7 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     mem_used = _to_int_or_none(mem_used_raw)
     mem_total = _to_int_or_none(mem_total_raw)
 
+    # 如果没拿到 used，但拿到了 total/free，则推导 used = total - free
     mem_free = _to_int_or_none(_coalesce_value(
         _find_value_by_any_key(source, ["memoryFree", "memory_free", "memFree", "ramFree", "freeMemory", "availableMemory"]),
         _find_value_by_key_tokens(source, ["memory", "free"], ["swap"]),
@@ -468,6 +466,17 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt", "responseTime"]),
         _find_value_by_key_tokens(source, ["latency"], []),
         _find_value_by_key_tokens(source, ["ping"], []),
+    ))
+
+    return NodeInstant(
+        uuid=str(uuid or ""),
+        name=str(name or uuid or ""),
+        cpu=cpu,
+        mem_used=mem_used,
+        mem_total=mem_total,
+        online=online,
+        latency_ms=latency_ms,
+    )
     ))
 
     return NodeInstant(
@@ -1353,6 +1362,7 @@ def listen_commands():
                         "/top 6h（任意Nh）\n"
                         "/status [节点名关键词]\n"
                         "/statusraw [节点名关键词]（查看原始字段）\n"
+                    )
                         "管理员：/archive；初始化：运行 bootstrap"
                     )
 

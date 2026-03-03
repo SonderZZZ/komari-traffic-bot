@@ -175,7 +175,6 @@ docker compose exec komari-traffic-bot \
 | `/top month` | 本月 Top           |
 | `/status`    | 查看全部节点瞬时状态（CPU/内存/在线/延迟） |
 | `/status hk` | 按节点名关键词筛选瞬时状态 |
-| `/statusraw hk` | 输出节点 recent 原始字段（用于排查字段名） |
 
 ## 🕒 关于时区
 统计口径时区：STAT_TZ（默认 Asia/Shanghai）
