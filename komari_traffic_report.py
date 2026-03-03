@@ -371,6 +371,10 @@ def _extract_node_instant(last_point: dict, node_info: dict, uuid: str, name: st
         _pick_by_paths(source["recent"], [("cpu",), ("system", "cpu"), ("system", "cpuUsage")]),
         _find_value_by_any_key(source, ["cpu", "cpuUsage", "cpuPercent", "cpu_percent", "cpu_load", "load1"]),
     )
+def _extract_node_instant(last_point: dict, uuid: str, name: str) -> NodeInstant:
+    cpu_raw = _pick_by_paths(last_point, [
+        ("cpu",), ("cpuUsage",), ("cpuPercent",), ("cpu_percent",), ("system", "cpu"),
+    ])
     cpu = _to_float_or_none(cpu_raw)
     if cpu is not None and 0 <= cpu <= 1:
         cpu *= 100
@@ -395,6 +399,20 @@ def _extract_node_instant(last_point: dict, node_info: dict, uuid: str, name: st
         _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
         _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt"]),
     ))
+    mem_used = _to_int_or_none(_pick_by_paths(last_point, [
+        ("memory", "used"), ("memoryUsed",), ("memory_used",), ("memUsed",), ("mem", "used"),
+    ]))
+    mem_total = _to_int_or_none(_pick_by_paths(last_point, [
+        ("memory", "total"), ("memoryTotal",), ("memory_total",), ("memTotal",), ("mem", "total"),
+    ]))
+
+    online = _to_int_or_none(_pick_by_paths(last_point, [
+        ("online",), ("onlineCount",), ("users", "online"), ("xray", "online"),
+    ]))
+
+    latency_ms = _to_float_or_none(_pick_by_paths(last_point, [
+        ("latency",), ("latencyMs",), ("latency_ms",), ("ping",), ("delay",),
+    ]))
 
     return NodeInstant(
         uuid=uuid,
@@ -505,6 +523,7 @@ def fetch_nodes_instant():
 
         last = points[-1] if isinstance(points[-1], dict) else {}
         return _extract_node_instant(last, node_info=node, uuid=uuid, name=name), None
+        return _extract_node_instant(last, uuid=uuid, name=name), None
 
     max_workers = max(1, min(len(nodes), KOMARI_FETCH_WORKERS))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
