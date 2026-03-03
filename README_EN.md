@@ -201,6 +201,48 @@ Telegram update offset
 
 Upgrades and restarts will not lose data.
 
+
+## 🏗 Build your own image and use it in compose
+If you prefer using **your own image repository** (Docker Hub / private GHCR), follow these steps.
+
+### 1) Build a local image from this repo
+```
+docker build -t komari-traffic-bot:local .
+```
+
+### 2) Tag with your own repository/name
+```
+docker tag komari-traffic-bot:local yourname/komari-traffic-bot:v1.0.0
+```
+
+### 3) Push to your registry (optional but recommended)
+```
+docker login
+docker push yourname/komari-traffic-bot:v1.0.0
+```
+
+### 4) Update `docker-compose.yml` image fields
+Use your image for both services:
+```
+services:
+  komari-traffic-bot:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+
+  komari-traffic-cron:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+```
+
+### 5) Restart services
+```
+docker compose up -d
+docker compose ps
+docker compose logs -f komari-traffic-bot
+```
+
+> For future upgrades, rebuild/re-tag/re-push, then update the tag in compose (for example `v1.0.1`) and run `docker compose up -d`.
+
 ## 🔄 Upgrade
 ```
 docker pull ghcr.io/wirelouis/komari-traffic-bot:latest

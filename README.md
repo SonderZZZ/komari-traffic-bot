@@ -200,6 +200,48 @@ Telegram offset
 
 升级 / 重启容器不会丢数据。
 
+
+## 🏗 自建镜像并替换为你的镜像（推荐）
+如果你希望使用**自己的镜像仓库**（例如 Docker Hub / GHCR 私有仓库），可以按下面步骤操作。
+
+### 1) 在项目目录构建本地镜像
+```
+docker build -t komari-traffic-bot:local .
+```
+
+### 2) 打你的镜像标签（把仓库名改成你的）
+```
+docker tag komari-traffic-bot:local yourname/komari-traffic-bot:v1.0.0
+```
+
+### 3) 推送到你的镜像仓库（可选，但推荐）
+```
+docker login
+docker push yourname/komari-traffic-bot:v1.0.0
+```
+
+### 4) 修改 `docker-compose.yml` 的 image
+把两个服务都改成你的镜像：
+```
+services:
+  komari-traffic-bot:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+
+  komari-traffic-cron:
+    image: yourname/komari-traffic-bot:v1.0.0
+    ...
+```
+
+### 5) 重启服务
+```
+docker compose up -d
+docker compose ps
+docker compose logs -f komari-traffic-bot
+```
+
+> 以后升级你自己的版本时，只需要重新 build/tag/push，然后把 compose 中 tag 改为新版本（如 `v1.0.1`）再 `docker compose up -d`。
+
 ## 🔄 升级方式
 ```
 docker pull ghcr.io/wirelouis/komari-traffic-bot:latest
