@@ -416,10 +416,30 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
         _pick_by_paths(source["recent"], [("latency",), ("network", "latency"), ("ping",)]),
         _find_value_by_any_key(source, ["latency", "latencyMs", "latency_ms", "ping", "delay", "rtt"]),
     ))
+    mem_used = _to_int_or_none(_pick_by_paths(last_point, [
+    ("memory", "used"), ("memoryUsed",), ("memory_used",), ("memUsed",), ("mem", "used"),
+]))
+    mem_total = _to_int_or_none(_pick_by_paths(last_point, [
+    ("memory", "total"), ("memoryTotal",), ("memory_total",), ("memTotal",), ("mem", "total"),
+]))
 
-    return NodeInstant(
-        uuid=str(uuid or ""),
-        name=str(name or uuid or ""),
+    online = _to_int_or_none(_pick_by_paths(last_point, [
+    ("online",), ("onlineCount",), ("users", "online"), ("xray", "online"),
+]))
+
+    latency_ms = _to_float_or_none(_pick_by_paths(last_point, [
+    ("latency",), ("latencyMs",), ("latency_ms",), ("ping",), ("delay",),
+]))
+
+return NodeInstant(
+    uuid=str(uuid or ""),
+    name=str(name or uuid or ""),
+    cpu=cpu,
+    mem_used=mem_used,
+    mem_total=mem_total,
+    online=online,
+    latency_ms=latency_ms,
+)
         cpu=cpu,
         mem_used=mem_used,
         mem_total=mem_total,
@@ -526,6 +546,7 @@ def fetch_nodes_instant():
 
         last = points[-1] if isinstance(points[-1], dict) else {}
         return _extract_node_instant(last, node_info=node, uuid=uuid, name=name), None
+        return _extract_node_instant(last, uuid=uuid, name=name), None
 
     max_workers = max(1, min(len(nodes), KOMARI_FETCH_WORKERS))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
