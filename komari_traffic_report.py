@@ -393,9 +393,6 @@ def _coalesce_value(*vals):
             return v
     return None
 
-
-
-
 def _estimate_online_from_connections(source: dict) -> int | None:
     conn = _coalesce_value(
         _pick_by_paths(source.get("recent", {}), [("connections",)]),
@@ -462,6 +459,7 @@ def _extract_node_instant(last_point: dict, *args, **kwargs) -> NodeInstant:
     mem_used = _to_int_or_none(mem_used_raw)
     mem_total = _to_int_or_none(mem_total_raw)
 
+    # 如果没拿到 used，但拿到了 total/free，则推导 used = total - free
     mem_free = _to_int_or_none(_coalesce_value(
         _find_value_by_any_key(source, ["memoryFree", "memory_free", "memFree", "ramFree", "freeMemory", "availableMemory"]),
         _find_value_by_key_tokens(source, ["memory", "free"], ["swap"]),
@@ -1372,6 +1370,7 @@ def listen_commands():
                         "/top 6h（任意Nh）\n"
                         "/status [节点名关键词]\n"
                         "/statusraw [节点名关键词]（查看原始字段）\n"
+                    )
                         "管理员：/archive；初始化：运行 bootstrap"
                     )
 
